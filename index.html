@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>schemeJs</title>
+
+		<script type="text/javascript" src="jquery-2.1.1.min.js"></script>
+		<script type="text/javascript" src="d3.js" charset="utf-8"></script>
+
+		<style></style>
+
+		<script>
+
+			//use knockout.js ?
+
+			$(document).ready(function() {
+				var svgContainer = d3.select('body').append('svg')
+													.attr('width', 900)
+													.attr('height', 400);
+
+
+				var memory = new function(){
+					var memoryVect = [];
+					var memoryCellsRect = [];
+					var memoryCellsText = [];
+
+					this.push = function(content){
+						memoryVect.push(content);
+
+						var xpos = memoryCellsRect.length * 45;
+
+						memoryCellsRect.push(svgContainer.append('rect')
+												.attr('x', xpos)
+												.attr('y', 10)
+												.attr('width', 40)
+												.attr('height', 40)
+												.attr('fill','orange')
+										);
+
+
+						memoryCellsText.push(svgContainer.append('text')
+												.attr('x', xpos + 5)
+												.attr('y', 30)
+												.attr('font-family', 'arial')
+												.attr('font-size', '11px')
+												.attr('fill', 'black')
+												.attr('id', 'textEl_' + (memoryCellsRect.length - 1))
+												.text(content)
+									);
+
+						//setTimeout //setIntervall
+						//requestAnimationFrame
+
+
+					}
+					this.get = function(p){
+						return memoryVect[p];
+					}
+					this.length = function(){
+						return memoryVect.length;
+					}
+					this.ref = function(p, offset){
+						return memoryVect[p + offset];
+					}
+					this.refSet = function(p, offset, value){
+						var pos = p + offset;
+						memoryVect[pos] = value;
+						memoryCellsRect[pos].attr('fill','yellow');				
+						d3.select('#textEl_' + pos).text('' + value);
+					}
+				}
+				
+
+				/*var maxmemory = 20;
+				var memory = [];*/
+				var free = 0;
+
+				function malloc(n){
+					memory.push(n);
+					var p = free + 1;
+					for(var i = 0; i < n; i++){
+						memory.push('empty');
+					}
+					free = free + n + 1;
+					return p;
+				}
+
+				function ref(p, offset){
+					return memory.ref(p, offset);
+				}
+
+				function refSet(p, offset, value){		
+					memory.refSet(p, offset, value);
+					return p + offset;
+				}
+
+				function dumpAt(p){
+					var recordSize = memory.get(p - 1);
+					var str = p + '\t[' + recordSize + '] ';
+					for(var i = 0; i < recordSize; i++){
+						str = str + ref(p, i) + '  ';
+					}
+					console.log(str);
+				}
+
+				function dump(){
+					var p = 1;
+					while (p < memory.length()) {
+						dumpAt(p);
+						p = p + memory.get(p - 1) + 1;	
+					}
+				}
+		
+				function tag(p){
+					return ref(p, 0);
+				}
+
+				var iTrue = refSet(malloc(1), 0, 'true');
+				var iFalse = refSet(malloc(1), 0, 'false');
+				var iNull = refSet(malloc(1), 0, 'null');
+				var iUndefined = refSet(malloc(1), 0, 'undefined');
+				var iVoid = refSet(malloc(1), 0, 'void');
+				var voidStr = '#<void>';
+
+				function newSymbol(name){
+					var p = malloc(2);
+					refSet(p, 0, 'symbol');
+					refSet(p, 1, name);
+					return p;
+				}
+
+				function symbolToName(p){
+					if(tag(p) == 'symbol'){
+						return ref(p, 1);
+					} else {
+						console.log('no symbol stored at ' + p);
+						return voidStr;
+					}
+				}
+
+				function newNumber(value){
+					var p = malloc(2);
+					refSet(p, 0, 'number');
+					refSet(p, 1, value);
+					return p;
+				}
+
+				function numberToValue(p){
+					if(tag(p) == 'number'){
+						return ref(p, 1);
+					} else {
+						console.log('no number stored at ' + p);
+						return voidStr;
+					}
+				} 
+
+				function newPair(p0, p1){
+					var p = malloc(3);
+					refSet(p, 0, 'pair');
+					refSet(p, 1, p0);
+					refSet(p, 2, p1);
+					return p;
+				}
+
+				function pairToCar(p){
+					if(tag(p) == 'pair'){
+						return ref(p, 1);
+					} else {
+						console.log('no pair stored at ' + p + ', can\'t give car');
+						return voidStr;
+					}
+				}
+
+				function pairToCdr(p){
+					if(tag(p) == 'pair'){
+						return ref(p, 2);
+					} else {
+						console.log('no pair stored at ' + p + ', can\'t give cdr');
+						return voidStr;
+					}
+				}
+
+				function exprToIexpr(expr){
+					if($.isNumeric(expr)){
+						return newNumber(expr);
+					} 	
+					if(expr == '#t'){
+						return iTrue;
+					}
+					if(expr == '#f'){
+						return iFalse;
+					}
+					if(expr.indexOf('(') > -1 && expr.indexOf(')') > -1){ // has brackets
+						return createPairChain(expr);
+					}
+					return newSymbol(expr); //else
+				}
+
+				/* EXPRTOIEXPR HELPER METHODS START */
+
+				function createPairChain(inputRawStr){	
+					var fragments = processRawStr(inputRawStr);
+					console.log(fragments);
+					var i = 0;
+					var openingPosStack = [];
+					while(i < fragments.length){ //TODO error handling
+						while(fragments[i] != ')' || i > fragments.length){
+							if(fragments[i] == '('){
+								openingPosStack.push(i);
+							}
+							i++;
+						} 
+						var closestOpeningPos = openingPosStack.pop();
+						var sub = fragments.splice(closestOpeningPos, i - closestOpeningPos + 1);
+						sub = sub.splice(1, sub.length - 2); //Klammern wegmachen
+						i = i - sub.length;
+						fragments.splice(closestOpeningPos, 0, consChain(sub));
+					}
+					return fragments[0];			
+				}
+
+				function processRawStr(inputRawStr){
+					var extendedStr = '';
+					for(var i = 0; i < inputRawStr.length; i++){
+						switch(inputRawStr.charAt(i)){
+							case '(':
+								extendedStr = extendedStr + '( ';
+								break;
+							case ')':
+								extendedStr = extendedStr + ' )';
+								break;
+							default:
+								extendedStr = extendedStr + inputRawStr.charAt(i);
+						}
+					}
+					return extendedStr.split(' ');
+				}
+
+				function consChain(content){
+					if(content.length > 1){	//number is a pointer to an already created pair
+						return newPair((typeof(content[0]) == 'number' ? content[0] : exprToIexpr(content[0])), consChain(content.splice(1, content.length)));
+					} else {
+						return newPair((typeof(content[0]) == 'number' ? content[0] : exprToIexpr(content[0])), iNull)
+					}
+				}
+
+				/* EXPRTOIEXPR HELPER METHODS END */
+
+				function IexprToExpr(p){
+					var baseCaseCheck = IexprToExprBASECASES(p);
+					if(!baseCaseCheck){
+						switch(tag(p)){
+							case 'pair':
+								return '(' + IexprToExprPAIRCASE(p);
+						}
+					}
+					return baseCaseCheck;
+				}
+
+				function IexprToExprBASECASES(p){
+					switch(tag(p)){
+						case 'number':
+							return numberToValue(p);
+						case 'symbol':
+							return symbolToName(p);
+						case 'true':
+							return '#t';
+						case 'false':
+							return '#f';
+						case 'null':
+							return '()';
+						default:
+							return false;
+					}
+				}
+
+				function IexprToExprPAIRCASE(p){
+					var baseCaseCheck = IexprToExprBASECASES(p);
+					if(!baseCaseCheck){
+						switch(tag(p)){
+							case 'pair':
+							var str = '';
+							if(tag(pairToCar(p)) == 'pair'){
+								str = str + '(';
+							}
+							str = str + IexprToExprPAIRCASE(pairToCar(p));
+							if(pairToCdr(p) == iNull){
+								return str + ')';
+							}
+							return str + ' ' + IexprToExprPAIRCASE(pairToCdr(p));
+						}
+					}
+					return baseCaseCheck;
+				}
+
+				var iEpsilon = refSet(malloc(1), 0, 'epsilon');
+
+				function newBinding(symbol, value, compose){
+					var p = malloc(4);
+					refSet(p, 0, 'bind');
+					refSet(p, 1, symbol);
+					refSet(p, 2, value);
+					refSet(p, 3, compose);
+					return p;
+				}
+
+				function bindingToValue(symbol, binding){
+					//console.log('called bindingToValue with symbol ' + symbol + ' and binding ' + binding);
+					if(tag(binding) == tag(iEpsilon)){
+						return '#f';
+					}
+					if(symbolToName(ref(binding,1)) == symbolToName(symbol)){
+						return ref(binding,2);
+					}
+					return bindingToValue(symbol, ref(binding,3));
+				}
+
+				function newEnvironment(binding){
+					var p = malloc(2);
+					refSet(p, 0, 'environment');
+					refSet(p, 1, binding);
+					return p;
+				}
+
+				var iEnvironment = newEnvironment(iEpsilon);
+
+				function environmentToBinding(env){
+					if(tag(env) == 'environment'){
+						return ref(env, 1);
+					}
+					console.log('no environment stored at ' + env);
+					return '#f';
+				}
+
+				function environmentSet(env, binding){
+					if(tag(env) == 'environment' && tag(binding) == 'bind'){
+						refSet(env, 1, binding);
+					} else {
+						console.log('env is no environment and/or binding is no bind');
+					}
+				}
+
+				function addVariable(variable, value, env){
+					environmentSet(env, newBinding(variable, value, environmentToBinding(env)));
+				}
+
+				function variableToValue(variable, env){
+					return bindingToValue(variable, environmentToBinding(env));
+				}
+
+				function newPrimitive(func){
+					var p = malloc(2);
+					refSet(p, 0, 'primitive');
+					refSet(p, 1, func);
+					return p;
+				}
+
+				function primitiveToFunc(p){
+					if(tag(p) == 'primitive'){
+						return ref(p, 1);
+					}
+					console.log('no primitive stored at ' + p);
+				}
+
+				function addPrimitive(name, func){ //add primitive function to iEnvironment
+					addVariable(newSymbol(name), newPrimitive(func), iEnvironment);
+				}
+
+				function iPlus(env, values){
+					//console.log('iPlus called with env:' + env + ' and values:' + values);
+					var sum = 0; 
+					var car = pairToCar(values);
+					var cdr = pairToCdr(values);
+					while(cdr != iNull){
+						sum = sum + parseInt(numberToValue(iEval(env, car))); 
+						car = pairToCar(cdr);
+						//console.log('car: ' + car);
+						cdr = pairToCdr(cdr); 
+						//console.log('cdr: ' + cdr);
+					}
+					sum = sum + parseInt(numberToValue(iEval(env, car)));			
+					return newNumber(sum);
+				}
+
+				addPrimitive('+', iPlus);
+
+				function iEval(env, exp){
+					//console.log('iEval called with env:' + env + ' and exp:' + exp + ' (tag: ' + tag(exp) +')');
+					switch(tag(exp)){
+						case 'number':
+							return exp;
+						case 'true':
+							return exp;
+						case 'false':
+							return exp;
+						case 'null':
+							return exp;
+						case 'symbol':
+							return variableToValue(exp, env);
+						case 'pair':
+							return iApply(env, iEval(env, pairToCar(exp)), pairToCdr(exp));
+					}
+				}
+
+
+				function iApply(env, func, arglist){
+					//console.log('iApply called with env:' + env + ', func:' + func + ' and arglist:' + arglist);
+					switch(tag(func)){
+						case 'primitive':
+							return primitiveToFunc(func)(env, arglist);
+						case 'lambda':
+							return null;
+						default:
+							console.log('iApply was called on something thats not primitive or lambda');
+					}
+				}
+
+
+				var p = exprToIexpr('(+ 2 3 (+ 4 5) 6)');
+				iEval(iEnvironment, p);
+
+				dump();
+
+
+				/*var testSymbol = newSymbol('a');
+				var testNumber = newNumber(3);
+				console.log(memory);
+				dump();
+				
+				var p = exprToIexpr('(+ 1 2 (- 3 7) 4)');
+				
+				console.log(IexprToExpr(p));
+
+				var mySymbol1 = newSymbol('x');
+				var myValue1 = newNumber(7);
+				var mySymbol2 = newSymbol('y');
+				var myValue2 = newNumber(8);
+				var mySymbol3 = newSymbol('z');
+				var myValue3 = newNumber(9);
+				var myBinding1 = newBinding(mySymbol1, myValue1, iEpsilon);
+				var myBinding2 = newBinding(mySymbol2, myValue2, myBinding1);
+				var myBinding3 = newBinding(mySymbol3, myValue3, myBinding2);
+
+				console.log(bindingToValue(mySymbol3, myBinding2));
+
+				addVariable(newSymbol('r'), newNumber(5), iEnvironment);
+
+				console.log(iEnvironment);
+
+				var p = exprToIexpr('(+ 2 3 (+ 4 5) 6)');
+				iEval(iEnvironment, p);
+
+				dump();*/
+			});
+
+
+			/* PARKING LOT
+
+						if(pairToCdr(p) == iNull){
+							return IexprToExpr(pairToCar(p)) + ')';
+						} 
+						if(tag(pairToCar(p)) == 'pair'){
+							return '(' + IexprToExpr(pairToCar(p)) + ' ' + IexprToExpr(pairToCdr(p));							
+						}
+						return IexprToExpr(pairToCar(p)) + ' ' + IexprToExpr(pairToCdr(p));	
+
+			function cons(x, y){
+				var fn = function(pick) {return pick(x, y);}	
+				fn.pair = true;
+				fn.toString =  function(){
+					return '(' + fn.toStringFunc();
+				}
+				fn.toStringFunc = function(){
+					if(x.pair){
+						return '(' + x.toStringFunc() + (y == null? '' : y.toStringFunc());
+					} 
+					if(y == null){
+						return x + ') ';
+					} else {
+						return x + ' ' + y.toStringFunc();
+					}					
+				}
+				return fn;
+			} 
+			function car(fn){
+				return fn(function(x, y) {return x;});
+			}
+			function cdr(fn){
+				return fn(function(x, y) {return y;});
+			}
+
+			function PREexprToIexpr(expr){
+				if(hasBrackets(expr)){
+					var pair = createPairChain(expr);
+					console.log(pair);
+					exprToIexpr(pair);
+				} else {
+					exprToIexpr(expr);
+				}
+			}
+
+			function exprToIexpr(expr){
+
+				if(typeof(expr) == 'function'){
+
+					console.log('is function');
+
+					//(new-pair (expr->i-expr (car expr)) (expr->i-expr (cdr expr))))  
+
+					console.log(car(expr));
+					console.log(cdr(expr));
+
+					var part1 = exprToIexpr(car(expr));
+					console.log('part 1: ');
+					console.log(part1); 
+					var part2 = exprToIexpr(cdr(expr));
+					console.log('part 2: ');		
+					console.log(part2);
+					
+					return newPair(part1, part2);
+
+				} else {
+
+					if(expr == null){
+						console.log('is null');
+						return iNull;
+					}					
+
+					if($.isNumeric(expr)){
+						var p = newNumber(expr);
+						console.log(expr + ' > is number, got pointer: ' + p);
+						return p;
+					}
+
+					if(expr == '#t'){
+						return iTrue;
+					}
+					if(expr == '#f'){
+						return iFalse;
+					}
+
+					console.log(expr + ' > is number');	
+					return newSymbol(expr);
+				}
+				
+			}
+
+			function hasBrackets(str){
+				var hasOpening = false;
+				var hasClosing = false;
+				for(var i = 0; i < str.length; i++){
+					if(str.charAt(i) == '('){
+						hasOpening = true;
+					}
+					if(str.charAt(i) == ')'){
+						hasClosing = true;
+					}
+				}
+				return hasOpening && hasClosing;
+			}
+
+
+			function consChain(content){
+				if(content.length > 1){
+					return cons(content[0], consChain(content.splice(1, content.length)));
+				} else {
+					return cons(content[0], null);
+				}
+			}
+
+			function createPairChain(inputRawStr){	
+				var extendedStr = '';
+				for(var i = 0; i < inputRawStr.length; i++){
+					switch(inputRawStr.charAt(i)){
+						case '(':
+							extendedStr = extendedStr + '( ';
+							break;
+						case ')':
+							extendedStr = extendedStr + ' )';
+							break;
+						default:
+							extendedStr = extendedStr + inputRawStr.charAt(i);
+					}
+				}
+				var fragments = extendedStr.split(' ');
+				var i = 0;
+				var openingPosStack = [];
+				while(i < fragments.length){
+					while(fragments[i] != ')' || i > fragments.length){
+						if(fragments[i] == '('){
+							openingPosStack.push(i);
+						}
+						i++;
+					} 
+					var closestOpeningPos = openingPosStack.pop();
+					var sub = fragments.splice(closestOpeningPos, i - closestOpeningPos + 1);
+					sub = sub.splice(1, sub.length - 2); //Klammern wegmachen
+					i = i - sub.length;
+					fragments.splice(closestOpeningPos, 0, consChain(sub));
+				}			
+				return fragments[0];
+			}
+
+
+				function Node(content){
+				this.content = content;
+				this.parent = null;
+				this.children = new Array();
+				this.setParent = function(parentNode){
+					this.parent = parentNode;
+				}
+				this.addChild = function(childNode){
+					this.children.push(childNode);
+				}
+				this.hasChildren = function(){
+					return children.length > 0;
+				}
+				this.recursion = function(){
+					console.log(this.content);
+					for(var i = 0; i < this.children.length; i++){
+						var child = this.children[i];
+						child.recursion();
+					}
+				}
+				}
+
+				if(inputFragments.length == 1){				
+					if($.isNumeric(inputFragments[0])){
+						return new SchemeType('number', inputFragments[0])
+					} else {
+						return new SchemeType('symbol', inputFragments[0])
+					}
+				} else {
+					console.log(inputFragments);
+
+					var nodes = new Array();
+					var root = new Node('<root>');
+					nodes.push(root);
+					var currentNode = root;
+
+					for (var i in inputFragments){
+						console.log(inputFragments[i]);
+						switch(inputFragments[i]) {
+						    case '(':
+						        var node = new Node('<parent>');
+						        node.setParent(currentNode);
+						        currentNode.addChild(node);              
+						        nodes.push(node);
+						        currentNode = node;
+						        break;
+						    case ')':
+						        var node = new Node('<null>');
+						        node.setParent = currentNode;
+						        currentNode.addChild(node);
+						        nodes.push(node);
+						        currentNode = currentNode.parent;
+						        break;
+						    default:
+						    	var node = new Node(inputFragments[i]);
+						    	node.setParent(currentNode);
+						    	currentNode.addChild(node);
+						    	nodes.push(node);					        
+						}
+					}
+
+					//console.log(root.children[0]);
+					return new SchemeType('pair', new SchemePair(root.children[0]));
+				}*/
+
+		</script>
+	</head>
+	<body>
+
+	</body>
+</html>
